@@ -1,3 +1,5 @@
+pub mod ui;
+
 use fpsdk::{
     create_plugin,
     plugin::{message::DebugLogMsg, Plugin, PluginProxy},
@@ -7,6 +9,7 @@ use shared_memory::Shmem;
 use std::{
     collections::VecDeque,
     fmt::Debug,
+    panic::RefUnwindSafe,
     sync::{mpsc, Arc},
 };
 
@@ -32,6 +35,8 @@ struct Feedback {
     memory: Shmem,
     store: VecDeque<Sample>,
     uuid: uuid::Uuid,
+
+    ui_handle: ui::UIHandle,
 }
 
 impl std::fmt::Debug for Feedback {
@@ -63,6 +68,9 @@ impl Feedback {
     }
 }
 
+// TODO(emily): This is what we call a _lie_
+impl RefUnwindSafe for Feedback {}
+
 impl Drop for Feedback {
     fn drop(&mut self) {}
 }
@@ -72,6 +80,8 @@ impl Plugin for Feedback {
     where
         Self: Sized,
     {
+        unsafe { windows::Win32::System::Console::AllocConsole() };
+
         let config = shared_memory::ShmemConf::new()
             .size(100)
             .os_id(format!("emilydotgg-feedback-{}", std::process::id()));
@@ -103,6 +113,7 @@ impl Plugin for Feedback {
             memory,
             store: Default::default(),
             uuid: uuid::Uuid::new_v4(),
+            ui_handle: ui::UIHandle::new(),
         }
     }
 
@@ -123,8 +134,21 @@ impl Plugin for Feedback {
     fn on_message(&mut self, message: fpsdk::host::Message<'_>) -> Box<dyn fpsdk::AsRawPtr> {
         // No message handling 🤠
         match message {
-            fpsdk::host::Message::ShowEditor(hwnd) => {}
+            fpsdk::host::Message::ShowEditor(hwnd) => self
+                .ui_handle
+                .send_sync(ui::UIMessage::ShowEditor(hwnd))
+                .unwrap(),
             default => {}
+        }
+
+        while let Ok(msg) = self.ui_handle.rx.try_recv() {
+            match msg {
+                ui::PluginMessage::SetEditor(hwnd) => {
+                    if let Some(handle) = self.handle.as_ref() {
+                        handle.set_editor_hwnd(hwnd.unwrap_or(0 as *mut c_void));
+                    }
+                }
+            }
         }
         Box::new(0)
     }
@@ -217,12 +241,6 @@ impl Plugin for Feedback {
 
     fn proxy(&mut self, handle: PluginProxy) {
         self.handle = Some(handle)
-    }
-}
-
-impl eframe::App for Feedback {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        todo!()
     }
 }
 
