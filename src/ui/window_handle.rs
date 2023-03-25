@@ -1,6 +1,3 @@
-use ::windows::Win32::Foundation;
-use ::windows::Win32::UI::WindowsAndMessaging;
-
 use std::ffi::c_void;
 
 #[derive(Debug, Clone, Copy)]

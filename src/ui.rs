@@ -154,7 +154,7 @@ impl iced::Application for UI {
                     };
 
                     WindowsAndMessaging::SetParent(self_hwnd, handle.as_hwnd());
-                    WindowsAndMessaging::ShowWindow(self_hwnd, WindowsAndMessaging::SW_SHOW);
+                    WindowsAndMessaging::ShowWindow(self_hwnd, show_cmd);
                 }
 
                 // NOTE(emily): Send our (iced's) hwnd to FL to set as the editor window
