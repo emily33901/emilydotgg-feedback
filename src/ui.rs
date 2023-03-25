@@ -1,4 +1,4 @@
-use std::{ffi::c_void, sync::Arc, thread::JoinHandle};
+use std::{sync::Arc, thread::JoinHandle};
 
 use eyre::Result;
 
@@ -10,10 +10,12 @@ use uuid::Uuid;
 
 use crate::{Mode, PluginStateChange};
 
+pub mod window_handle;
+
 /// Message sent from Plugin to UI
 #[derive(Debug, Clone)]
 pub enum UIMessage {
-    ShowEditor(Option<*mut c_void>),
+    ShowEditor(window_handle::WindowHandle),
     StateChange(PluginStateChange),
     Die,
 }
@@ -21,18 +23,12 @@ pub enum UIMessage {
 /// Message sent from UI to Plugin
 #[derive(Debug)]
 pub enum PluginMessage {
-    SetEditor(Option<*mut c_void>),
+    SetEditor(window_handle::WindowHandle),
     SetMode(Mode),
     NewChannel,
     SelectChannel(Uuid),
     AskChannels,
 }
-
-unsafe impl Send for PluginMessage {}
-unsafe impl Sync for PluginMessage {}
-
-unsafe impl Send for UIMessage {}
-unsafe impl Sync for UIMessage {}
 
 pub struct UIHandle {
     thread_handle: Mutex<Option<JoinHandle<()>>>,
@@ -88,8 +84,7 @@ struct UIFlags {
 struct UI {
     rx: Arc<tokio::sync::Mutex<mpsc::Receiver<UIMessage>>>,
     tx: mpsc::Sender<PluginMessage>,
-    should_draw: bool,
-    hwnd: Mutex<Option<*mut c_void>>,
+    hwnd: Mutex<window_handle::WindowHandle>,
     selected_channel: Option<Uuid>,
     selected_mode: Option<Mode>,
     available_channels: Vec<Uuid>,
@@ -116,8 +111,7 @@ impl iced::Application for UI {
             Self {
                 tx: flags.tx.clone(),
                 rx: Arc::new(tokio::sync::Mutex::new(flags.rx)),
-                should_draw: false,
-                hwnd: Mutex::new(None),
+                hwnd: Mutex::new(window_handle::WindowHandle::null()),
                 selected_channel: None,
                 selected_mode: Some(Mode::Receiver),
                 available_channels: vec![],
@@ -142,26 +136,25 @@ impl iced::Application for UI {
     fn update(&mut self, message: Self::Message) -> iced::Command<Self::Message> {
         match message {
             Message::PluginMessage(UIMessage::ShowEditor(handle)) => {
-                self.should_draw = handle.is_some();
                 let change_mode_command =
-                    iced::window::change_mode::<Message>(if handle.is_some() {
+                    iced::window::change_mode::<Message>(if handle.is_valid() {
                         iced::window::Mode::Windowed
                     } else {
                         iced::window::Mode::Hidden
                     });
 
                 unsafe {
-                    use windows::Win32::Foundation::*;
                     use windows::Win32::UI::WindowsAndMessaging;
-                    let self_hwnd = self.hwnd.lock();
-                    let self_hwnd = HWND(self_hwnd.map_or(0, |x| x as isize) as isize);
-                    if let Some(parent_hwnd) = handle.map(|x| HWND(x as isize)) {
-                        WindowsAndMessaging::SetParent(self_hwnd, parent_hwnd);
-                        WindowsAndMessaging::ShowWindow(self_hwnd, WindowsAndMessaging::SW_SHOW);
+                    let self_hwnd = self.hwnd.lock().as_hwnd();
+
+                    let show_cmd = if handle.is_valid() {
+                        WindowsAndMessaging::SW_SHOW
                     } else {
-                        WindowsAndMessaging::ShowWindow(self_hwnd, WindowsAndMessaging::SW_HIDE);
-                        WindowsAndMessaging::SetParent(self_hwnd, HWND(0));
-                    }
+                        WindowsAndMessaging::SW_HIDE
+                    };
+
+                    WindowsAndMessaging::SetParent(self_hwnd, handle.as_hwnd());
+                    WindowsAndMessaging::ShowWindow(self_hwnd, WindowsAndMessaging::SW_SHOW);
                 }
 
                 // NOTE(emily): Send our (iced's) hwnd to FL to set as the editor window
@@ -267,7 +260,7 @@ impl iced::Application for UI {
     }
 
     fn hwnd(&self, hwnd: *mut std::ffi::c_void) {
-        *self.hwnd.lock() = Some(hwnd);
+        *self.hwnd.lock() = hwnd.into();
     }
 
     type Theme = iced::Theme;

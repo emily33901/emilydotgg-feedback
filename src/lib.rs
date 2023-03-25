@@ -148,10 +148,6 @@ impl Plugin for Feedback {
     where
         Self: Sized,
     {
-        unsafe {
-            windows::Win32::System::Console::AllocConsole();
-        }
-
         let router =
             SharedRouter::new_or_open(&format!("emilydotgg-feedback-{}", std::process::id()));
 
@@ -168,7 +164,7 @@ impl Plugin for Feedback {
     }
 
     fn info(&self) -> fpsdk::plugin::Info {
-        fpsdk::plugin::InfoBuilder::new_effect("emilydotgg-feedback", "feedback", 1)
+        fpsdk::plugin::InfoBuilder::new_effect("emilydotgg-feedback", "feedback", 0)
             .want_new_tick()
             .build()
     }
@@ -217,7 +213,7 @@ impl Plugin for Feedback {
             fpsdk::host::Message::ShowEditor(hwnd) => {
                 self.send_available_channels();
                 self.ui_handle
-                    .send_sync(ui::UIMessage::ShowEditor(hwnd))
+                    .send_sync(ui::UIMessage::ShowEditor(hwnd.into()))
                     .unwrap();
             }
             _ => {}
@@ -228,7 +224,7 @@ impl Plugin for Feedback {
             match msg {
                 ui::PluginMessage::SetEditor(hwnd) => {
                     if let Some(handle) = self.handle.as_ref() {
-                        handle.set_editor_hwnd(hwnd.unwrap_or(0 as *mut c_void));
+                        handle.set_editor_hwnd(hwnd.as_ptr().unwrap_or(0 as *mut c_void));
                     }
                 }
                 ui::PluginMessage::NewChannel => {
@@ -246,12 +242,6 @@ impl Plugin for Feedback {
     fn name_of(&self, _value: fpsdk::host::GetName) -> String {
         "No names".into()
     }
-
-    fn process_event(&mut self, _event: fpsdk::host::Event) {}
-
-    fn idle(&mut self) {}
-
-    fn tick(&mut self) {}
 
     fn render(&mut self, input: &[[f32; 2]], output: &mut [[f32; 2]]) {
         match self.mode {
