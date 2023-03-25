@@ -1,0 +1,51 @@
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.HOME }}/.cargo/bin/
+            ${{ env.HOME }}/.cargo/registry/index/
+            ${{ env.HOME }}/.cargo/registry/cache/
+            ${{ env.HOME }}/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Stable with rustfmt and clippy
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check format
+        run: cargo fmt -- --check
+
+      - name: Release build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
+
+      - name: Upload
+        uses: actions/upload-artifact@v3
+        with:
+          name: emilydotgg-feedback
+          path: target/release/emilydotgg-feedback.dll
+          if-no-files-found: error

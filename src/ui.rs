@@ -3,20 +3,31 @@ use std::{ffi::c_void, sync::Arc, thread::JoinHandle};
 use eyre::Result;
 
 use futures::stream;
-use iced::Application;
+use iced::window;
+use iced::{Alignment, Application, Padding};
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
+use uuid::Uuid;
+
+use crate::Mode;
 
 /// Message sent from Plugin to UI
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UIMessage {
     ShowEditor(Option<*mut c_void>),
+    NewChannelId(Uuid),
+    AvailableChannels(Vec<Uuid>),
+    Die,
 }
 
 /// Message sent from UI to Plugin
 #[derive(Debug)]
 pub enum PluginMessage {
     SetEditor(Option<*mut c_void>),
+    SetMode(Mode),
+    NewChannel,
+    SelectChannel(Uuid),
+    AskChannels,
 }
 
 unsafe impl Send for PluginMessage {}
@@ -49,6 +60,7 @@ impl UIHandle {
             });
             settings.antialiasing = true;
             settings.window.resizable = false;
+            settings.window.size = (200, 200);
             settings.window.decorations = false;
             UI::run(settings).unwrap();
         });
@@ -60,6 +72,12 @@ impl UIHandle {
     pub fn send_sync(&self, message: UIMessage) -> Result<()> {
         self.tx.blocking_send(message)?;
         Ok(())
+    }
+
+    pub fn join(&self) {
+        self.thread_handle.lock().take().map(|h| {
+            h.join().unwrap();
+        });
     }
 }
 
@@ -73,12 +91,18 @@ struct UI {
     tx: mpsc::Sender<PluginMessage>,
     should_draw: bool,
     hwnd: Mutex<Option<*mut c_void>>,
+    selected_channel: Option<Uuid>,
+    selected_mode: Option<Mode>,
+    available_channels: Vec<Uuid>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Message {
     /// A message from the Plugin to the UI
     PluginMessage(UIMessage),
+    ModeSelected(Mode),
+    ChannelSelected(Uuid),
+    NewChannel,
     None,
 }
 
@@ -91,12 +115,20 @@ impl iced::Application for UI {
     fn new(flags: Self::Flags) -> (Self, iced::Command<Self::Message>) {
         (
             Self {
-                tx: flags.tx,
+                tx: flags.tx.clone(),
                 rx: Arc::new(tokio::sync::Mutex::new(flags.rx)),
                 should_draw: false,
                 hwnd: Mutex::new(None),
+                selected_channel: None,
+                selected_mode: Some(Mode::Receiver),
+                available_channels: vec![],
             },
-            iced::Command::none(),
+            iced::Command::batch([iced::Command::perform(
+                async move {
+                    flags.tx.send(PluginMessage::AskChannels).await.unwrap();
+                },
+                |_| Message::None,
+            )]),
         )
     }
 
@@ -136,6 +168,64 @@ impl iced::Application for UI {
                     |_| Message::None,
                 ))
             }
+            Message::PluginMessage(UIMessage::NewChannelId(id)) => {
+                println!("New Channel {id}");
+
+                self.selected_channel = Some(id);
+
+                None
+            }
+            Message::PluginMessage(UIMessage::AvailableChannels(channels)) => {
+                self.available_channels = channels;
+
+                None
+            }
+            Message::PluginMessage(UIMessage::Die) => Some(iced::window::close::<Message>()),
+
+            Message::ModeSelected(new_mode) => {
+                println!("Mode {new_mode}");
+                self.selected_mode = Some(new_mode);
+
+                let host_message_tx = self.tx.clone();
+                Some(iced::Command::perform(
+                    async move {
+                        host_message_tx
+                            .send(PluginMessage::SetMode(new_mode))
+                            .await
+                            .unwrap()
+                    },
+                    |_| Message::None,
+                ))
+            }
+            Message::ChannelSelected(channel) => {
+                self.selected_channel = Some(channel);
+
+                let host_message_tx = self.tx.clone();
+                Some(iced::Command::perform(
+                    async move {
+                        host_message_tx
+                            .send(PluginMessage::SelectChannel(channel))
+                            .await
+                            .unwrap()
+                    },
+                    |_| Message::None,
+                ))
+            }
+            Message::NewChannel => {
+                println!("New channel");
+
+                let host_message_tx = self.tx.clone();
+                Some(iced::Command::perform(
+                    async move {
+                        host_message_tx
+                            .send(PluginMessage::NewChannel)
+                            .await
+                            .unwrap()
+                    },
+                    |_| Message::None,
+                ))
+            }
+
             _ => None,
         }
         .or(Some(iced::Command::none()))
@@ -151,7 +241,20 @@ impl iced::Application for UI {
     }
 
     fn view(&self) -> iced::Element<'_, Self::Message, iced::Renderer<Self::Theme>> {
-        iced::widget::column!(iced::widget::text("emilydotgg-feedback")).into()
+        iced::widget::column!(
+            iced::widget::text("emilydotgg-feedback"),
+            iced::widget::pick_list(&Mode::ALL[..], self.selected_mode, Message::ModeSelected),
+            iced::widget::pick_list(
+                &self.available_channels,
+                self.selected_channel,
+                Message::ChannelSelected
+            ),
+            iced::widget::button("New channel").on_press(Message::NewChannel),
+        )
+        .align_items(Alignment::Center)
+        .padding(Padding::new(10.0))
+        .spacing(20)
+        .into()
     }
 
     fn hwnd(&self, hwnd: *mut std::ffi::c_void) {
@@ -183,7 +286,7 @@ where
         self: Box<Self>,
         _input: stream::BoxStream<Event>,
     ) -> stream::BoxStream<Self::Output> {
-        Box::pin(futures::stream::unfold(self, |mut state| async move {
+        Box::pin(futures::stream::unfold(self, |state| async move {
             state.rx.lock().await.recv().await.map_or(None, |message| {
                 Some((Message::PluginMessage(message), state.clone()))
             })
