@@ -49,5 +49,5 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: emilydotgg-feedback
-          path: target/release/emilydotgg-feedback.dll
-          if-no-files-found: error
+          path: target/release/emilydotgg_feedback.dll
+          # if-no-files-found: error
