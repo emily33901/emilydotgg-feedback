@@ -1,23 +1,24 @@
 use std::{collections::HashMap, sync::mpsc};
 
-
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use uuid::Uuid;
 
 use crate::Sample;
 
-pub struct Channels<T>(mpsc::Sender<T>, mpsc::Receiver<T>);
+pub struct Channels<T>(mpsc::SyncSender<T>, mpsc::Receiver<T>);
 
 impl<T> Channels<T> {
     fn new() -> Self {
-        let (tx, rx) = mpsc::channel::<T>();
+        let (tx, rx) = mpsc::sync_channel::<T>(10);
 
         Self(tx, rx)
     }
 }
 
+type SamplesChannels = Channels<Vec<Sample>>;
+
 struct _Router {
-    channels: HashMap<Uuid, Channels<Vec<Sample>>>,
+    channels: HashMap<Uuid, SamplesChannels>,
 }
 
 impl _Router {
@@ -33,7 +34,11 @@ impl _Router {
         new_uuid
     }
 
-    fn channel(&mut self, uuid: &Uuid) -> Option<&mut Channels<Vec<Sample>>> {
+    fn new_channel_with_id(&mut self, uuid: &Uuid) {
+        self.channels.insert(uuid.clone(), Channels::new());
+    }
+
+    fn channel(&mut self, uuid: &Uuid) -> Option<&mut SamplesChannels> {
         self.channels.get_mut(uuid)
     }
 }
@@ -49,7 +54,11 @@ impl Router {
         self.0.lock().new_channel()
     }
 
-    pub fn channel(&self, uuid: &Uuid) -> Option<MappedMutexGuard<Channels<Vec<Sample>>>> {
+    pub fn new_channel_with_id(&self, uuid: &Uuid) {
+        self.0.lock().new_channel_with_id(uuid)
+    }
+
+    pub fn channel(&self, uuid: &Uuid) -> Option<MappedMutexGuard<SamplesChannels>> {
         MutexGuard::try_map(self.0.lock(), |s| s.channel(uuid)).ok()
     }
 
@@ -58,7 +67,7 @@ impl Router {
             .map(|c| MappedMutexGuard::map(c, |o| &mut o.1))
     }
 
-    pub fn tx(&self, uuid: &Uuid) -> Option<MappedMutexGuard<mpsc::Sender<Vec<Sample>>>> {
+    pub fn tx(&self, uuid: &Uuid) -> Option<MappedMutexGuard<mpsc::SyncSender<Vec<Sample>>>> {
         self.channel(uuid)
             .map(|c| MappedMutexGuard::map(c, |o| &mut o.0))
     }

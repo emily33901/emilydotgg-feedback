@@ -9,13 +9,14 @@ use fpsdk::{
 };
 use parking_lot::Mutex;
 use router::Router;
+use serde::{Deserialize, Serialize};
 use shared_memory::Shmem;
-use std::{collections::VecDeque, fmt::Debug, panic::RefUnwindSafe};
+use std::{collections::VecDeque, fmt::Debug, io::Read, panic::RefUnwindSafe};
 use uuid::Uuid;
 
 type Sample = [f32; 2];
 
-#[derive(Debug, PartialEq, Display, Clone, Copy, Eq)]
+#[derive(Debug, PartialEq, Display, Clone, Copy, Eq, Serialize, Deserialize)]
 pub enum Mode {
     Receiver,
     Sender,
@@ -23,6 +24,18 @@ pub enum Mode {
 
 impl Mode {
     const ALL: [Mode; 2] = [Mode::Receiver, Mode::Sender];
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub enum SaveState {
+    Ver1 { mode: Mode, uuid: uuid::Uuid },
+}
+
+#[derive(Debug, Clone)]
+pub enum PluginStateChange {
+    AvailableChannels(Vec<Uuid>),
+    ChannelId(Uuid),
+    Mode(Mode),
 }
 
 struct Feedback {
@@ -74,6 +87,33 @@ impl Feedback {
             .map(|c| while let Ok(_) = c.try_recv() {});
 
         self.uuid = Some(uuid);
+
+        // Inform UI of this
+        self.send_channel_id();
+    }
+
+    fn send_available_channels(&self) {
+        self.ui_handle
+            .send_sync(ui::UIMessage::StateChange(
+                PluginStateChange::AvailableChannels(self.router().ids()),
+            ))
+            .unwrap();
+    }
+
+    fn send_channel_id(&self) {
+        self.ui_handle
+            .send_sync(ui::UIMessage::StateChange(PluginStateChange::ChannelId(
+                self.uuid.clone().or(Some(Uuid::nil())).unwrap(),
+            )))
+            .unwrap();
+    }
+
+    fn send_mode(&self) {
+        self.ui_handle
+            .send_sync(ui::UIMessage::StateChange(PluginStateChange::Mode(
+                self.mode,
+            )))
+            .unwrap();
     }
 }
 
@@ -124,20 +164,47 @@ impl Plugin for Feedback {
             .build()
     }
 
-    fn save_state(&mut self, _writer: fpsdk::plugin::StateWriter) {
-        // No stave state
+    fn save_state(&mut self, writer: fpsdk::plugin::StateWriter) {
+        if let Some(uuid) = self.uuid {
+            let state = SaveState::Ver1 {
+                mode: self.mode,
+                uuid: uuid,
+            };
+
+            bincode::serialize_into(writer, &state).unwrap();
+        }
     }
 
-    fn load_state(&mut self, _reader: fpsdk::plugin::StateReader) {
+    fn load_state(&mut self, mut reader: fpsdk::plugin::StateReader) {
+        let mut buf: Vec<u8> = vec![];
+        reader
+            .read_to_end(&mut buf)
+            .and_then(|_| {
+                bincode::deserialize::<SaveState>(&buf).map_err(|e| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("error deserializing value {}", e),
+                    )
+                })
+            })
+            .map(|value| match value {
+                SaveState::Ver1 { mode, uuid } => {
+                    self.mode = mode;
+                    if let None = self.router().channel(&uuid) {
+                        self.router().new_channel_with_id(&uuid);
+                    }
+                    self.set_channel(uuid);
+                    self.send_mode();
+                }
+            })
+            .unwrap_or_else(|_e| self.log(format!("error reading state")));
         // No load state
     }
 
     fn on_message(&mut self, message: fpsdk::host::Message<'_>) -> Box<dyn fpsdk::AsRawPtr> {
         match message {
             fpsdk::host::Message::ShowEditor(hwnd) => {
-                self.ui_handle
-                    .send_sync(ui::UIMessage::AvailableChannels(self.router().ids()))
-                    .unwrap();
+                self.send_available_channels();
                 self.ui_handle
                     .send_sync(ui::UIMessage::ShowEditor(hwnd))
                     .unwrap();
@@ -156,19 +223,13 @@ impl Plugin for Feedback {
                 ui::PluginMessage::NewChannel => {
                     let id = self.router().new_channel();
                     self.set_channel(id);
-                    self.ui_handle
-                        .send_sync(ui::UIMessage::NewChannelId(id))
-                        .unwrap();
                 }
                 ui::PluginMessage::SelectChannel(id) => self.set_channel(id),
                 ui::PluginMessage::SetMode(mode) => {
                     println!("self.mode = {mode}");
                     self.mode = mode
                 }
-                ui::PluginMessage::AskChannels => self
-                    .ui_handle
-                    .send_sync(ui::UIMessage::AvailableChannels(self.router().ids()))
-                    .unwrap(),
+                ui::PluginMessage::AskChannels => self.send_available_channels(),
             }
         }
         Box::new(0)

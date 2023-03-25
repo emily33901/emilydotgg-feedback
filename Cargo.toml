@@ -17,7 +17,6 @@ log = "0.4"
 parking_lot = "0.12"
 shared_memory = "0.12.4"
 eyre = "0.6.8"
-# iced = { git = "https://github.com/emily33901/iced-any-thread", features=["tokio", "image", "canvas"]  }
 iced = { path = "iced", features=["tokio", "image", "canvas"]  }
 iced_native = { path = "iced/native" }
 iced_futures = { path = "iced/futures" }
@@ -31,6 +30,7 @@ features = [
     "v4",                # Lets you generate random UUIDs
     "fast-rng",          # Use a faster (but still sufficiently random) RNG
     "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
+    "serde",
 ]
 
 [dependencies.windows]

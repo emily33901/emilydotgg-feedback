@@ -8,14 +8,13 @@ use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::Mode;
+use crate::{Mode, PluginStateChange};
 
 /// Message sent from Plugin to UI
 #[derive(Debug, Clone)]
 pub enum UIMessage {
     ShowEditor(Option<*mut c_void>),
-    NewChannelId(Uuid),
-    AvailableChannels(Vec<Uuid>),
+    StateChange(PluginStateChange),
     Die,
 }
 
@@ -59,7 +58,8 @@ impl UIHandle {
             });
             settings.antialiasing = true;
             settings.window.resizable = false;
-            settings.window.size = (200, 200);
+            settings.window.visible = false;
+            settings.window.size = (400, 200);
             settings.window.decorations = false;
             UI::run(settings).unwrap();
         });
@@ -143,6 +143,13 @@ impl iced::Application for UI {
         match message {
             Message::PluginMessage(UIMessage::ShowEditor(handle)) => {
                 self.should_draw = handle.is_some();
+                let change_mode_command =
+                    iced::window::change_mode::<Message>(if handle.is_some() {
+                        iced::window::Mode::Windowed
+                    } else {
+                        iced::window::Mode::Hidden
+                    });
+
                 unsafe {
                     use windows::Win32::Foundation::*;
                     use windows::Win32::UI::WindowsAndMessaging;
@@ -157,26 +164,33 @@ impl iced::Application for UI {
                     }
                 }
 
+                // NOTE(emily): Send our (iced's) hwnd to FL to set as the editor window
                 let message = PluginMessage::SetEditor(self.hwnd.lock().clone());
                 let host_message_tx = self.tx.clone();
 
-                Some(iced::Command::perform(
-                    async move {
-                        host_message_tx.send(message).await.unwrap();
-                    },
-                    |_| Message::None,
-                ))
+                Some(iced::Command::batch([
+                    iced::Command::perform(
+                        async move {
+                            host_message_tx.send(message).await.unwrap();
+                        },
+                        |_| Message::None,
+                    ),
+                    change_mode_command,
+                ]))
             }
-            Message::PluginMessage(UIMessage::NewChannelId(id)) => {
-                println!("New Channel {id}");
-
-                self.selected_channel = Some(id);
-
-                None
-            }
-            Message::PluginMessage(UIMessage::AvailableChannels(channels)) => {
-                self.available_channels = channels;
-
+            Message::PluginMessage(UIMessage::StateChange(state_change)) => {
+                match state_change {
+                    PluginStateChange::AvailableChannels(channels) => {
+                        self.available_channels = channels;
+                    }
+                    PluginStateChange::ChannelId(id) => {
+                        println!("New Channel {id}");
+                        self.selected_channel = Some(id);
+                    }
+                    PluginStateChange::Mode(mode) => {
+                        self.selected_mode = Some(mode);
+                    }
+                };
                 None
             }
             Message::PluginMessage(UIMessage::Die) => Some(iced::window::close::<Message>()),
