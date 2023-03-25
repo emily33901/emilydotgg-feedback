@@ -59,7 +59,7 @@ impl UIHandle {
             settings.antialiasing = true;
             settings.window.resizable = false;
             settings.window.visible = false;
-            settings.window.size = (400, 200);
+            settings.window.size = (200, 200);
             settings.window.decorations = false;
             UI::run(settings).unwrap();
         });
@@ -196,7 +196,6 @@ impl iced::Application for UI {
             Message::PluginMessage(UIMessage::Die) => Some(iced::window::close::<Message>()),
 
             Message::ModeSelected(new_mode) => {
-                println!("Mode {new_mode}");
                 self.selected_mode = Some(new_mode);
 
                 let host_message_tx = self.tx.clone();
@@ -225,8 +224,6 @@ impl iced::Application for UI {
                 ))
             }
             Message::NewChannel => {
-                println!("New channel");
-
                 let host_message_tx = self.tx.clone();
                 Some(iced::Command::perform(
                     async move {

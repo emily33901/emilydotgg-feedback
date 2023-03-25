@@ -45,6 +45,11 @@ jobs:
           command: build
           args: --release --all-features
 
+      - name: Rename DLL
+        run: |
+          mv target/release/emilydotgg_feedback.dll target/release/emilydotgg_feedback_x64.dll;
+          mv target/release/emilydotgg_feedback.pdb target/release/emilydotgg_feedback_x64.pdb
+
       - name: Upload
         uses: actions/upload-artifact@v3
         with:
