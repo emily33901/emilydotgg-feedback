@@ -1,3 +1,4 @@
+pub mod router;
 pub mod ui;
 
 use derive_more::{Deref, DerefMut, Display};
@@ -7,14 +8,16 @@ use fpsdk::{
     ProcessParamFlags,
 };
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
+use router::Router;
 use shared_memory::Shmem;
 use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
     panic::RefUnwindSafe,
-    sync::{mpsc, Arc},
 };
 use uuid::Uuid;
+
+type Sample = [f32; 2];
 
 #[derive(Debug, PartialEq, Display, Clone, Copy, Eq)]
 pub enum Mode {
@@ -24,71 +27,6 @@ pub enum Mode {
 
 impl Mode {
     const ALL: [Mode; 2] = [Mode::Receiver, Mode::Sender];
-}
-
-type Sample = [f32; 2];
-
-struct Channels<T>(mpsc::Sender<T>, mpsc::Receiver<T>);
-
-impl<T> Channels<T> {
-    fn new() -> Self {
-        let (tx, rx) = mpsc::channel::<T>();
-
-        Self(tx, rx)
-    }
-}
-
-struct _Router {
-    channels: HashMap<Uuid, Channels<Vec<Sample>>>,
-}
-
-impl _Router {
-    fn new() -> Self {
-        Self {
-            channels: Default::default(),
-        }
-    }
-
-    fn new_channel(&mut self) -> Uuid {
-        let new_uuid = Uuid::new_v4();
-        self.channels.insert(new_uuid, Channels::new());
-        new_uuid
-    }
-
-    fn channel(&mut self, uuid: &Uuid) -> Option<&mut Channels<Vec<Sample>>> {
-        self.channels.get_mut(uuid)
-    }
-}
-
-#[derive(Deref, DerefMut)]
-struct Router(Mutex<_Router>);
-
-impl Router {
-    fn new() -> Self {
-        Self(Mutex::new(_Router::new()))
-    }
-
-    fn new_channel(&self) -> Uuid {
-        self.lock().new_channel()
-    }
-
-    fn channel(&self, uuid: &Uuid) -> Option<MappedMutexGuard<Channels<Vec<Sample>>>> {
-        MutexGuard::try_map(self.lock(), |s| s.channel(uuid)).ok()
-    }
-
-    fn rx(&self, uuid: &Uuid) -> Option<MappedMutexGuard<mpsc::Receiver<Vec<Sample>>>> {
-        self.channel(uuid)
-            .map(|c| MappedMutexGuard::map(c, |o| &mut o.1))
-    }
-
-    fn tx(&self, uuid: &Uuid) -> Option<MappedMutexGuard<mpsc::Sender<Vec<Sample>>>> {
-        self.channel(uuid)
-            .map(|c| MappedMutexGuard::map(c, |o| &mut o.0))
-    }
-
-    fn ids(&self) -> Vec<Uuid> {
-        self.lock().channels.keys().map(|k| *k).collect()
-    }
 }
 
 struct Feedback {
@@ -136,8 +74,8 @@ impl Feedback {
         // Set our id
         self.store.lock().clear();
         self.router()
-            .channel(&uuid)
-            .map(|c| while let Ok(_) = c.1.try_recv() {});
+            .rx(&uuid)
+            .map(|c| while let Ok(_) = c.try_recv() {});
 
         self.uuid = Some(uuid);
     }
@@ -152,7 +90,7 @@ impl Plugin for Feedback {
         Self: Sized,
     {
         let config = shared_memory::ShmemConf::new()
-            .size(100)
+            .size(std::mem::size_of::<*mut *mut Router>())
             .os_id(format!("emilydotgg-feedback-{}", std::process::id()));
         let open_config = config.clone();
         let mut memory = if let Ok(mut memory) = config.create() {
@@ -323,10 +261,6 @@ impl Plugin for Feedback {
     fn voice_handler(&mut self) -> Option<&mut dyn fpsdk::voice::ReceiveVoiceHandler> {
         None
     }
-
-    fn midi_in(&mut self, _message: fpsdk::MidiMessage) {}
-
-    fn loop_in(&mut self, _message: fpsdk::ValuePtr) {}
 
     fn proxy(&mut self, handle: PluginProxy) {
         self.handle = Some(handle)

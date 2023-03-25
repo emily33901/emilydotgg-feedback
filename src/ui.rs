@@ -3,7 +3,6 @@ use std::{ffi::c_void, sync::Arc, thread::JoinHandle};
 use eyre::Result;
 
 use futures::stream;
-use iced::window;
 use iced::{Alignment, Application, Padding};
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
