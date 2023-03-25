@@ -184,7 +184,6 @@ impl iced::Application for UI {
                         self.available_channels = channels;
                     }
                     PluginStateChange::ChannelId(id) => {
-                        println!("New Channel {id}");
                         self.selected_channel = Some(id);
                     }
                     PluginStateChange::Mode(mode) => {
