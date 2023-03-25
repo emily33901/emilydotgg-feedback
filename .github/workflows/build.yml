@@ -14,8 +14,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-        with:
-          submodules: recursive
+
+      - name: Submodules Recursive
+        run: |
+          git submodule update --init --recursive
 
       - uses: actions/cache@v3
         with:
