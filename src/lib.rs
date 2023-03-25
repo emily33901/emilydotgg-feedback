@@ -1,20 +1,16 @@
 pub mod router;
 pub mod ui;
 
-use derive_more::{Deref, DerefMut, Display};
+use derive_more::Display;
 use fpsdk::{
     create_plugin,
     plugin::{message::DebugLogMsg, Plugin, PluginProxy},
     ProcessParamFlags,
 };
-use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
+use parking_lot::Mutex;
 use router::Router;
 use shared_memory::Shmem;
-use std::{
-    collections::{HashMap, VecDeque},
-    fmt::Debug,
-    panic::RefUnwindSafe,
-};
+use std::{collections::VecDeque, fmt::Debug, panic::RefUnwindSafe};
 use uuid::Uuid;
 
 type Sample = [f32; 2];
@@ -93,7 +89,7 @@ impl Plugin for Feedback {
             .size(std::mem::size_of::<*mut *mut Router>())
             .os_id(format!("emilydotgg-feedback-{}", std::process::id()));
         let open_config = config.clone();
-        let mut memory = if let Ok(mut memory) = config.create() {
+        let memory = if let Ok(mut memory) = config.create() {
             // TODO(emily): This probably needs to not be a box and be some reference counting structure
             // so that this doesn't blow up immediately
             let channels = Box::leak(Box::new(Router::new()));
@@ -128,11 +124,11 @@ impl Plugin for Feedback {
             .build()
     }
 
-    fn save_state(&mut self, writer: fpsdk::plugin::StateWriter) {
+    fn save_state(&mut self, _writer: fpsdk::plugin::StateWriter) {
         // No stave state
     }
 
-    fn load_state(&mut self, reader: fpsdk::plugin::StateReader) {
+    fn load_state(&mut self, _reader: fpsdk::plugin::StateReader) {
         // No load state
     }
 
@@ -178,7 +174,7 @@ impl Plugin for Feedback {
         Box::new(0)
     }
 
-    fn name_of(&self, value: fpsdk::host::GetName) -> String {
+    fn name_of(&self, _value: fpsdk::host::GetName) -> String {
         "No names".into()
     }
 
@@ -186,7 +182,7 @@ impl Plugin for Feedback {
 
     fn process_param(
         &mut self,
-        index: usize,
+        _index: usize,
         value: fpsdk::ValuePtr,
         flags: fpsdk::ProcessParamFlags,
     ) -> Box<dyn fpsdk::AsRawPtr> {
@@ -232,7 +228,7 @@ impl Plugin for Feedback {
                                         store.push_back(s)
                                     }
                                 }
-                                Err(err) => {
+                                Err(_err) => {
                                     break;
                                 }
                             }

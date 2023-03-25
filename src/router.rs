@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::mpsc};
 
-use derive_more::{Deref, DerefMut};
+
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use uuid::Uuid;
 
