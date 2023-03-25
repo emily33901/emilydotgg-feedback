@@ -55,6 +55,6 @@ jobs:
         with:
           name: emilydotgg-feedback
           path: |
-            target/release/emilydotgg_feedback.dll
-            target/release/emilydotgg_feedback.pdb
-          # if-no-files-found: error
+            target/release/emilydotgg_feedback_x64.dll
+            target/release/emilydotgg_feedback_x64.pdb
+          if-no-files-found: error
