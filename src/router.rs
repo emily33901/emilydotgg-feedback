@@ -72,10 +72,8 @@ impl Router {
             .map(|c| MappedMutexGuard::map(c, |o| &mut o.1))
     }
 
-    // TODO(emily): tx can (and should) return a clone of the sender, so as to not hold on to the mutex forever
-    pub fn tx(&self, uuid: &Uuid) -> Option<MappedMutexGuard<mpsc::SyncSender<Vec<Sample>>>> {
-        self.channel(uuid)
-            .map(|c| MappedMutexGuard::map(c, |o| &mut o.0))
+    pub fn tx(&self, uuid: &Uuid) -> Option<mpsc::SyncSender<Vec<Sample>>> {
+        self.channel(uuid).map(|c| c.0.clone())
     }
 
     pub fn ids(&self) -> Vec<Uuid> {
@@ -83,13 +81,13 @@ impl Router {
     }
 }
 
-pub struct _SharedRouter(Option<(Router, Shmem)>);
+pub struct _SharedRouter(Router, Option<Shmem>);
 
 impl std::ops::Deref for _SharedRouter {
     type Target = Router;
 
     fn deref(&self) -> &Self::Target {
-        self.0.as_ref().map(|s| &s.0).unwrap()
+        &self.0
     }
 }
 impl _SharedRouter {}
@@ -98,7 +96,7 @@ impl Drop for _SharedRouter {
     fn drop(&mut self) {
         // We were dropped (last person holding the shared memory)
         // Now we need to clear ourselves up
-        if let Some((_router, mut shmem)) = self.0.take() {
+        if let Some(mut shmem) = self.1.take() {
             shmem.set_owner(true);
             let zelf_box =
                 unsafe { Weak::from_raw(*(shmem.as_ptr() as *mut *const _SharedRouter)) };
@@ -120,7 +118,7 @@ impl SharedRouter {
         if let Ok(memory) = config.create() {
             let mem_ptr = memory.as_ptr();
 
-            let inner = Arc::new(_SharedRouter(Some((Router::new(), memory))));
+            let inner = Arc::new(_SharedRouter(Router::new(), Some(memory)));
             let weak = Arc::downgrade(&inner);
 
             unsafe {
